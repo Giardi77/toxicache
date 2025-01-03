@@ -1,26 +1,28 @@
 package main
 
 import (
-	"fmt"
-	"net"
-	"net/url"
-	"math/rand"
-	"crypto/tls"
-	"io/ioutil"
-	"net/http"
-	"strings"
-	"runtime"
 	"bufio"
+	"crypto/tls"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
-	"flag"
-	"os"
 )
 
 // THREADS represents the number of goroutines to be spawned for concurrent processing.
-var THREADS int 
+var THREADS int
 var REFLECT int = 0
 var userAgent string
+
+var delay int
 
 type headerCheck struct {
 	url    string
@@ -29,24 +31,24 @@ type headerCheck struct {
 }
 
 func main() {
-	// Initialize a scanner to read input.
 	var sc *bufio.Scanner
 
-	// Get information about the standard input.
 	stat, _ := os.Stdin.Stat()
 
 	// Define command-line flags.
 	var inputFile string
 	flag.StringVar(&inputFile, "i", "", "Input File Location")
-	
+
 	outputFile := "/tmp/toxicache-" + time.Now().Format("2006-01-02_15-04-05") + ".txt"
 	flag.StringVar(&outputFile, "o", outputFile, "Output File Location")
-	
+
 	userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 12_2_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
 	flag.StringVar(&userAgent, "ua", userAgent, "User Agent Header")
-	
+
 	THREADS = runtime.NumCPU() * 5
 	flag.IntVar(&THREADS, "t", THREADS, "Number of Threads")
+
+	flag.IntVar(&delay, "d", 0, "Delay between requests in milliseconds")
 
 	flag.Parse()
 
@@ -88,6 +90,11 @@ func main() {
 
 	// Create a pool of goroutines to perform final checks concurrently.
 	done := makePool(headerChecks, func(c headerCheck, output chan headerCheck) {
+		// ---- APPLY THE DELAY BEFORE EACH REQUEST ----
+		if delay > 0 {
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+		}
+
 		reflected, err := checkHeaderReflected(c.url, c.header, c.check)
 		if err != nil || !reflected {
 			return
@@ -96,7 +103,7 @@ func main() {
 		REFLECT++
 
 		fmt.Printf("\n"+colorize("Headers reflected: [%v]", "11"), formatHeaders(c.header))
-		fmt.Printf("\n"+c.url+"\n")
+		fmt.Printf("\n" + c.url + "\n")
 
 		if _, err := fmt.Fprintf(OutFile, "Headers reflected: %v @ %s\n", formatHeaders(c.header), c.url); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing to file: %v\n", err)
@@ -142,8 +149,7 @@ func main() {
 	close(headerChecks)
 	<-done
 
-	fmt.Printf("\n▶ Number of Reflections Found: " + colorize("%v", "80") + "\n", REFLECT)
-
+	fmt.Printf("\n▶ Number of Reflections Found: "+colorize("%v", "80")+"\n", REFLECT)
 }
 
 func colorize(text, color string) string {
@@ -158,7 +164,7 @@ _____  ___  __     _   ___    __    ___   _     ____
 
 				      @xhzeem | v0.2				
 `
-	banner := colorize(fmt.Sprintf(bannerFormat, "`","`"), "204")
+	banner := colorize(fmt.Sprintf(bannerFormat, "`", "`"), "204")
 
 	// Print to standard error
 	fmt.Fprintln(os.Stderr, banner)
@@ -166,11 +172,12 @@ _____  ___  __     _   ___    __    ___   _     ____
 
 var transport = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	
+
+	// Uncomment and adjust if you need a local proxy:
 	// Proxy: http.ProxyURL(&url.URL{
-    //     Scheme: "http", 
-    //     Host:   "127.0.0.1:8080",
-    // }),
+	//     Scheme: "http",
+	//     Host:   "127.0.0.1:8080",
+	// }),
 
 	DialContext: (&net.Dialer{
 		Timeout:   30 * time.Second,
@@ -183,14 +190,12 @@ var httpClient = &http.Client{
 	Transport: transport,
 }
 
-
 func checkHeaderReflected(targetURL string, headers http.Header, checkValue string) (bool, error) {
-
 	modifiedURL, err := toxicParam(targetURL)
 	if err != nil {
 		fmt.Println("Error modifying URL:", err)
-		return false, err // Adjusted to return a bool and an error.
-	}	
+		return false, err
+	}
 
 	req, err := http.NewRequest("GET", modifiedURL, nil)
 	if err != nil {
@@ -220,7 +225,7 @@ func checkHeaderReflected(targetURL string, headers http.Header, checkValue stri
 	for _, headerValues := range resp.Header {
 		for _, headerValue := range headerValues {
 			if strings.Contains(headerValue, checkValue) {
-			//	fmt.Printf("Reflected in header: %s: %s\n", headerName, headerValue)
+				// Found the reflection in the header
 				return true, nil
 			}
 		}
@@ -264,19 +269,19 @@ func toxicParam(targetURL string) (string, error) {
 }
 
 func hasCacheHeader(resp *http.Response) bool {
-    cacheHeaders := []string{
-        "x-cache", "cf-cache-status", "x-drupal-cache", "x-varnish-cache", "akamai-cache-status",
-        "server-timing", "x-iinfo", "x-nc", "x-hs-cf-cache-status", "x-proxy-cache",
-        "x-cache-hits", "x-cache-status", "x-cache-info", "x-rack-cache", "cdn_cache_status",
-        "x-akamai-cache", "x-akamai-cache-remote", "x-cache-remote",
-    }
+	cacheHeaders := []string{
+		"x-cache", "cf-cache-status", "x-drupal-cache", "x-varnish-cache", "akamai-cache-status",
+		"server-timing", "x-iinfo", "x-nc", "x-hs-cf-cache-status", "x-proxy-cache",
+		"x-cache-hits", "x-cache-status", "x-cache-info", "x-rack-cache", "cdn_cache_status",
+		"x-akamai-cache", "x-akamai-cache-remote", "x-cache-remote",
+	}
 
-    for _, header := range cacheHeaders {
-        if _, ok := resp.Header[http.CanonicalHeaderKey(header)]; ok {
-            return true
-        }
-    }
-    return false
+	for _, header := range cacheHeaders {
+		if _, ok := resp.Header[http.CanonicalHeaderKey(header)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func formatHeaders(headers map[string][]string) string {
@@ -293,8 +298,8 @@ type workerFunc func(headerCheck, chan headerCheck)
 
 func makePool(input chan headerCheck, fn workerFunc) chan headerCheck {
 	var wg sync.WaitGroup
-
 	output := make(chan headerCheck)
+
 	for i := 0; i < THREADS; i++ {
 		wg.Add(1)
 		go func() {

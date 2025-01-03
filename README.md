@@ -13,6 +13,7 @@ go install github.com/xhzeem/toxicache@latest
   -o *str   Output File Location
   -ua *str  User-Agent Header
   -t *int   Number of Threads
+  -d *int   Delay in milliseconds
 ```
 
 ## Usage
